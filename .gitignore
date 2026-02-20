@@ -1,0 +1,30 @@
+# 数据库文件（本地数据，不上传）
+data/articles.db
+data/*.db
+
+# 日志文件
+logs/
+*.log
+
+# 报告文件（自动生成，不上传）
+reports/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+src/__pycache__/
+.pytest_cache/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
