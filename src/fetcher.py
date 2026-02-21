@@ -10,6 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field
 
@@ -60,15 +61,16 @@ class RSSFetcher:
     def __init__(self, timeout: int = 15, max_per_feed: int = 10):
         self.timeout = timeout
         self.max_per_feed = max_per_feed
+        self.session = requests.Session()
+        self.session.headers.update(HEADERS)
 
     def fetch(self, url: str, company: str, region: str) -> list[Article]:
         articles = []
         try:
             logger.info(f"[RSS] 抓取 {company}: {url}")
             # 先用 requests 下载内容（使用 certifi 证书），再交给 feedparser 解析
-            resp = requests.get(
+            resp = self.session.get(
                 url,
-                headers=HEADERS,
                 timeout=self.timeout,
                 verify=certifi.where(),
             )
@@ -174,16 +176,12 @@ class WebScraper:
         results = []
         seen_urls = set()
 
-        # 优先查找文章容器
-        article_selectors = [
-            "article", ".post", ".blog-post", ".news-item",
-            ".entry", ".card", "[class*='article']", "[class*='post']",
-            "[class*='news']", "[class*='blog']",
-        ]
-
-        containers = []
-        for sel in article_selectors:
-            containers.extend(soup.select(sel))
+        # 优先查找文章容器（合并为单次选择器调用）
+        article_selector = (
+            "article, .post, .blog-post, .news-item, .entry, .card, "
+            "[class*='article'], [class*='post'], [class*='news'], [class*='blog']"
+        )
+        containers = soup.select(article_selector)
 
         if not containers:
             # 降级：找所有有标题的链接
@@ -198,7 +196,6 @@ class WebScraper:
 
             href = link_tag["href"]
             if not href.startswith("http"):
-                from urllib.parse import urljoin
                 href = urljoin(base_url, href)
 
             if href in seen_urls or "#" in href:
@@ -235,6 +232,11 @@ class NewsFetcher:
 
     def __init__(self, rss_fetcher: RSSFetcher):
         self.rss_fetcher = rss_fetcher
+        # 预计算小写关键词，避免每次调用时重建
+        self._keywords_lower = [
+            kw.lower()
+            for kw in self.AI_KEYWORDS["en"] + self.AI_KEYWORDS["zh"]
+        ]
 
     def fetch(self, name: str, rss_url: str, category: str) -> list[Article]:
         all_articles = self.rss_fetcher.fetch(rss_url, name, "aggregator")
@@ -250,8 +252,7 @@ class NewsFetcher:
 
     def _is_ai_related(self, text: str) -> bool:
         text_lower = text.lower()
-        all_keywords = self.AI_KEYWORDS["en"] + self.AI_KEYWORDS["zh"]
-        return any(kw.lower() in text_lower for kw in all_keywords)
+        return any(kw in text_lower for kw in self._keywords_lower)
 
 
 class InvestFetcher:
