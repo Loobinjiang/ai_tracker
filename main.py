@@ -49,7 +49,6 @@ def crawl(
     web_scraper = WebScraper(timeout=20, max_articles=8)
     news_fetcher = NewsFetcher(rss_fetcher)
 
-    all_new_articles = []
     total_new = 0
     total_dup = 0
 
@@ -84,9 +83,6 @@ def crawl(
         new, dup = storage.save_many(company_articles)
         total_new += new
         total_dup += dup
-        all_new_articles.extend(
-            [a for a in company_articles if storage.is_url_exists(a.url)]
-        )
         if company_articles:
             logger.info(f"  {company}: +{new} 新增, {dup} 重复")
 
@@ -101,7 +97,7 @@ def crawl(
             time.sleep(0.5)
 
     logger.info(f"\n抓取完成 — 新增: {total_new} | 重复跳过: {total_dup}")
-    return all_new_articles
+    return total_new
 
 
 def crawl_invest(storage: Storage) -> int:
@@ -149,6 +145,7 @@ def run_schedule(interval_hours: int = 6):
     while True:
         logger.info("=== 开始定时抓取 ===")
         crawl(storage)
+        crawl_invest(storage)
         reporter.generate_daily_report(days=1)
         logger.info(f"下次抓取将在 {interval_hours} 小时后...")
         time.sleep(interval_hours * 3600)

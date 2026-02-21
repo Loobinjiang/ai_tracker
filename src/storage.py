@@ -30,6 +30,7 @@ class Storage:
 
     def _init_db(self):
         with self._get_conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS articles (
                     id          TEXT PRIMARY KEY,
@@ -100,25 +101,47 @@ class Storage:
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
-                conn.commit()
-                is_new = conn.execute(
-                    "SELECT changes()"
-                ).fetchone()[0] > 0
-                return is_new
+                return conn.execute("SELECT changes()").fetchone()[0] > 0
         except Exception as e:
             logger.error(f"保存文章失败 [{article.title}]: {e}")
             return False
 
     def save_many(self, articles: list[Article]) -> tuple[int, int]:
         """批量保存，返回 (新增数, 重复数)"""
-        new_count = 0
-        dup_count = 0
-        for art in articles:
-            if self.save(art):
-                new_count += 1
-            else:
-                dup_count += 1
-        return new_count, dup_count
+        if not articles:
+            return 0, 0
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [
+            (
+                self._make_id(art.url),
+                art.title,
+                art.url,
+                art.summary,
+                art.published_at.isoformat() if art.published_at else None,
+                art.company,
+                art.region,
+                art.source_type,
+                json.dumps(art.tags, ensure_ascii=False),
+                now,
+            )
+            for art in articles
+        ]
+        try:
+            with self._get_conn() as conn:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO articles
+                    (id, title, url, summary, published_at, company, region,
+                     source_type, tags, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                new_count = conn.execute("SELECT changes()").fetchone()[0]
+        except Exception as e:
+            logger.error(f"批量保存文章失败: {e}")
+            return 0, len(articles)
+        return new_count, len(articles) - new_count
 
     def get_recent(
         self,
@@ -128,7 +151,6 @@ class Storage:
         limit: int = 100,
     ) -> list[dict]:
         """获取最近N天的文章"""
-        from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
         conditions = ["fetched_at >= ?"]
@@ -203,9 +225,7 @@ class Storage:
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
-                conn.commit()
-                is_new = conn.execute("SELECT changes()").fetchone()[0] > 0
-                return is_new
+                return conn.execute("SELECT changes()").fetchone()[0] > 0
         except Exception as e:
             logger.error(f"保存投资内容失败 [{title}]: {e}")
             return False
